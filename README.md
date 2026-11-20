@@ -43,6 +43,7 @@ stats:
 
 <p align="left">
   <a href="https://mello2110.github.io/binary-explorer/"><b>Live Demo / Web App</b></a> &nbsp;|&nbsp;
+  <a href="https://mellow-solutions-hub.vercel.app"><b>Mellow Solutions Hub</b></a> &nbsp;|&nbsp;
   <a href="https://github.com/Mello2110"><b>Mellow Solutions on GitHub</b></a> &nbsp;|&nbsp;
   <a href="https://buymeacoffee.com/mellowsolutions"><b>Buy Me a Coffee</b></a>
 </p>
