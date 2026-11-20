@@ -502,6 +502,32 @@
       }
     }
 
+    .brand-foot {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.65rem;
+      font-size: 0.72rem;
+      color: var(--raw);
+      letter-spacing: 0.03em;
+      flex-wrap: wrap;
+    }
+
+    .brand-foot img {
+      height: 12px;
+      width: auto;
+      opacity: 0.72;
+      mix-blend-mode: screen;
+    }
+
+    .brand-foot a {
+      color: var(--raw);
+      text-decoration: none;
+      transition: color 0.15s ease;
+    }
+
+    .brand-foot a:hover { color: var(--muted); }
+
     @media (prefers-reduced-motion: reduce) {
       .idle-cursor { animation: none; }
       .dot, .touch-bit, .axis-btn, .copy-btn { transition: none; }
@@ -586,6 +612,15 @@
       </svg>
     </button>
   </footer>
+
+  <div class="brand-foot">
+    <img src="./assets/mellow-mark.png" alt="Mellow Solutions" />
+    <span>Mellow Solutions</span>
+    <span aria-hidden="true">·</span>
+    <a href="https://github.com/Mello2110" target="_blank" rel="noopener noreferrer">GitHub</a>
+    <span aria-hidden="true">·</span>
+    <a href="https://buymeacoffee.com/mellowsolutions" target="_blank" rel="noopener noreferrer">Buy Me a Coffee</a>
+  </div>
 
   <div class="tip-popup" id="tip-popup" role="tooltip"></div>
 
