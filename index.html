@@ -1,0 +1,1644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>0 / 1 — Architecture &amp; Layers</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0c0f;
+      --text: #edeae2;
+      --muted: #96938b;       /* >= 5.8:1 on --bg */
+      --raw: #7d7a72;         /* >= 4.5:1 on --bg */
+      --faint: #23262e;
+      --accent: #d9a05b;      /* warm amber, no neon glow */
+      --accent-soft: rgba(217, 160, 91, 0.16);
+      --accent-2: #8ab4d8;    /* calm slate-blue for language level */
+      --warn: #e59866;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    ::selection {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    html {
+      scrollbar-color: var(--faint) var(--bg);
+      scrollbar-width: thin;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-variant-numeric: tabular-nums;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.5rem clamp(1rem, 4vw, 2.5rem) 1.75rem;
+      gap: 1.5rem;
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+      border-radius: 6px;
+    }
+
+    /* Top bar: pure architecture & standard switcher */
+    nav {
+      width: 100%;
+      max-width: 920px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem 1.5rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--faint);
+    }
+
+    .nav-group {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem 1.35rem;
+    }
+
+    .axis {
+      display: flex;
+      gap: 1.1rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .nav-divider {
+      width: 1px;
+      height: 0.95rem;
+      background: var(--faint);
+    }
+
+    .axis-btn {
+      background: none;
+      border: none;
+      padding: 0.4rem 0.1rem;
+      font: inherit;
+      font-size: 0.82rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      cursor: pointer;
+      position: relative;
+      transition: color 0.16s ease;
+    }
+
+    .axis-btn:hover { color: var(--text); }
+
+    .axis-btn[aria-selected="true"] {
+      color: var(--accent);
+    }
+
+    .axis-btn[aria-selected="true"]::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 1px;
+      background: var(--accent);
+    }
+
+    .axis-level .axis-btn[aria-selected="true"] {
+      color: var(--accent-2);
+    }
+
+    .axis-level .axis-btn[aria-selected="true"]::after {
+      background: var(--accent-2);
+    }
+
+    .axis-level.is-hidden {
+      display: none;
+    }
+
+    .axis-data .axis-btn[aria-selected="true"] {
+      color: var(--text);
+    }
+
+    .axis-data .axis-btn[aria-selected="true"]::after {
+      background: var(--text);
+    }
+
+    /* Main workspace: balanced, open, uses width well */
+    main {
+      width: 100%;
+      max-width: 920px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1.85rem;
+      padding: 0.5rem 0;
+    }
+
+    .stage-wrap {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .stage-output {
+      width: 100%;
+      min-height: 7.5rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1.25rem;
+      text-align: center;
+    }
+
+    .idle-cursor {
+      width: 2px;
+      height: 2rem;
+      background: var(--accent);
+      animation: blink 1.1s steps(2, start) infinite;
+    }
+
+    @keyframes blink {
+      to { opacity: 0; }
+    }
+
+    /* Code / Disassembly lines with logical category */
+    .code-list {
+      width: min(100%, 36rem);
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+      font-family: var(--mono);
+      font-size: clamp(0.95rem, 2vw, 1.18rem);
+      letter-spacing: 0.01em;
+    }
+
+    .code-line {
+      color: var(--text);
+      transition: color 0.15s ease;
+      cursor: default;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1.5rem;
+      text-align: left;
+      padding: 0.12rem 0;
+    }
+
+    .code-cat {
+      font-family: var(--sans);
+      font-size: 0.76rem;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+      flex-shrink: 0;
+    }
+
+    .code-line:hover { color: var(--accent); }
+    .code-line.is-invalid { color: var(--warn); }
+    .code-line.is-pending { color: var(--muted); font-style: italic; }
+
+    .cpu-state {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      color: var(--muted);
+      display: flex;
+      gap: 1.25rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      letter-spacing: 0.04em;
+    }
+
+    .cpu-state strong {
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    /* UTF-8 Text output + seamless bidirectional input */
+    .text-flow {
+      font-family: var(--mono);
+      font-size: clamp(1.4rem, 3.8vw, 2.25rem);
+      letter-spacing: 0.05em;
+      line-height: 1.45;
+      word-break: break-word;
+      max-width: 100%;
+    }
+
+    .text-char { transition: color 0.15s ease; }
+    .text-char:hover { color: var(--accent); }
+
+    .text-ctrl,
+    .text-err {
+      font-size: 0.85rem;
+      color: var(--warn);
+      vertical-align: middle;
+      margin: 0 0.2rem;
+      cursor: help;
+    }
+
+    .text-err { font-size: inherit; }
+
+    .utf8-input {
+      background: none;
+      border: none;
+      border-bottom: 1px solid var(--faint);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.94rem;
+      text-align: center;
+      width: min(100%, 26rem);
+      padding: 0.4rem 0.5rem;
+      caret-color: var(--accent);
+      transition: border-color 0.15s ease;
+    }
+
+    .utf8-input::placeholder { color: var(--raw); }
+
+    .utf8-input:focus {
+      outline: none;
+      border-bottom-color: var(--accent);
+    }
+
+    /* RGB Color output */
+    .rgb-flow {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 1.15rem;
+    }
+
+    .rgb-dot {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.45rem;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .rgb-swatch {
+      width: 3.4rem;
+      height: 3.4rem;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .pending-hint {
+      font-family: var(--mono);
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+
+    /* Discrete copy button */
+    .copy-btn {
+      background: none;
+      border: none;
+      padding: 0.3rem 0.5rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-family: var(--mono);
+      font-size: 0.74rem;
+      color: var(--muted);
+      cursor: pointer;
+      opacity: 0.7;
+      transition: opacity 0.15s ease, color 0.15s ease;
+    }
+
+    .copy-btn:hover { opacity: 1; color: var(--text); }
+    .copy-btn.is-copied { opacity: 1; color: var(--accent); }
+    .copy-btn.is-hidden { visibility: hidden; pointer-events: none; }
+
+    /* 8-bit pulse & raw stream */
+    .bits-wrap {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.85rem;
+    }
+
+    .byte-pulse {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .dots {
+      display: flex;
+      gap: 0.6rem;
+    }
+
+    .dot {
+      width: 0.8rem;
+      height: 0.8rem;
+      border-radius: 50%;
+      border: 1px solid #30343f;
+      transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.16s ease, border-color 0.16s ease;
+    }
+
+    .dot.is-one {
+      background: var(--accent);
+      border-color: var(--accent);
+      transform: scale(1.06);
+    }
+
+    .dot.is-zero {
+      background: #2b2f38;
+      border-color: #626670;
+    }
+
+    .bit-counter {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+
+    .raw-bits {
+      font-family: var(--mono);
+      font-size: 0.84rem;
+      color: var(--raw);
+      letter-spacing: 0.08em;
+      max-width: 100%;
+      word-break: break-all;
+      text-align: center;
+      line-height: 1.75;
+    }
+
+    .raw-bits .byte-group {
+      margin: 0 0.35rem;
+      display: inline-block;
+      transition: color 0.15s ease;
+    }
+
+    .raw-bits .byte-group.is-active {
+      color: var(--accent);
+    }
+
+    /* Bottom tactile control bar: [×] [0] [1] [⌫] */
+    footer {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      justify-content: center;
+      padding-top: 0.25rem;
+    }
+
+    .touch-bit {
+      background: none;
+      border: 1px solid var(--faint);
+      border-radius: 999px;
+      width: 3.35rem;
+      height: 3.35rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--mono);
+      font-size: 1.15rem;
+      color: var(--text);
+      cursor: pointer;
+      transition: border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .touch-bit:hover:not(:disabled),
+    .touch-bit.is-pressed {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .touch-bit:active:not(:disabled),
+    .touch-bit.is-pressed { transform: scale(0.94); }
+
+    .touch-action {
+      width: 2.85rem;
+      height: 2.85rem;
+      color: var(--muted);
+    }
+
+    .touch-action:disabled {
+      opacity: 0.28;
+      cursor: default;
+    }
+
+    /* Minimalist floating tooltip */
+    .tip-popup {
+      position: fixed;
+      z-index: 50;
+      pointer-events: none;
+      background: #14161b;
+      border: 1px solid #2b2f38;
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 0.76rem;
+      line-height: 1.4;
+      padding: 0.4rem 0.65rem;
+      border-radius: 6px;
+      max-width: 19rem;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+      opacity: 0;
+      transform: translate(-50%, -100%) translateY(-6px);
+      transition: opacity 0.12s ease;
+    }
+
+    .tip-popup.is-visible { opacity: 1; }
+
+    /* Mobile optimization */
+    @media (max-width: 640px) {
+      body {
+        padding: 1.1rem 1rem 1.4rem;
+        gap: 1rem;
+      }
+
+      nav {
+        justify-content: center;
+        gap: 0.5rem 1rem;
+      }
+
+      .nav-group {
+        justify-content: center;
+        gap: 0.5rem 1rem;
+      }
+
+      .nav-divider { display: none; }
+
+      main {
+        gap: 1.35rem;
+      }
+
+      .code-line {
+        font-size: 0.92rem;
+        gap: 0.85rem;
+      }
+
+      .touch-bit {
+        width: 3.6rem;
+        height: 3.6rem;
+        font-size: 1.25rem;
+      }
+
+      .touch-action {
+        width: 3.1rem;
+        height: 3.1rem;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .idle-cursor { animation: none; }
+      .dot, .touch-bit, .axis-btn, .copy-btn { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <nav aria-label="Dimensionen">
+    <div class="nav-group">
+      <div class="axis" role="tablist" aria-label="Prozessor">
+        <button type="button" class="axis-btn" role="tab" aria-selected="true" data-arch="6502">6502</button>
+        <button type="button" class="axis-btn" role="tab" aria-selected="false" data-arch="z80">Z80</button>
+        <button type="button" class="axis-btn" role="tab" aria-selected="false" data-arch="chip8">CHIP-8</button>
+        <button type="button" class="axis-btn" role="tab" aria-selected="false" data-arch="8086">8086</button>
+      </div>
+
+      <div class="axis axis-level" id="level-axis" role="tablist" aria-label="Abstraktionsebene">
+        <button type="button" class="axis-btn" role="tab" aria-selected="true" data-level="asm">Assembler</button>
+        <button type="button" class="axis-btn" role="tab" aria-selected="false" data-level="cpp">C++</button>
+        <button type="button" class="axis-btn" role="tab" aria-selected="false" data-level="py">Python</button>
+      </div>
+    </div>
+
+    <div class="nav-group">
+      <span class="nav-divider" aria-hidden="true"></span>
+      <div class="axis axis-data" role="tablist" aria-label="Data standards">
+        <button type="button" class="axis-btn" role="tab" aria-selected="false" data-arch="utf8">UTF-8</button>
+        <button type="button" class="axis-btn" role="tab" aria-selected="false" data-arch="hex">HEX</button>
+        <button type="button" class="axis-btn" role="tab" aria-selected="false" data-arch="rgb">RGB</button>
+        <button type="button" class="axis-btn" role="tab" aria-selected="false" data-arch="hsl">HSL</button>
+      </div>
+      <span class="nav-divider" aria-hidden="true"></span>
+      <div class="axis axis-lang" role="tablist" aria-label="Language">
+        <button type="button" class="axis-btn" role="tab" aria-selected="true" data-lang="en">EN</button>
+        <button type="button" class="axis-btn" role="tab" aria-selected="false" data-lang="de">DE</button>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <div class="stage-wrap">
+      <div class="stage-output" id="stage-output" aria-live="polite">
+        <div class="idle-cursor" aria-hidden="true"></div>
+      </div>
+
+      <button type="button" class="copy-btn is-hidden" id="copy-output" aria-label="Übersetzung kopieren" title="Übersetzung kopieren">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+        </svg>
+        <span></span>
+      </button>
+    </div>
+
+    <div class="bits-wrap">
+      <div class="byte-pulse">
+        <div class="dots" id="dots" aria-hidden="true"></div>
+        <div class="bit-counter" id="bit-counter">tippe 0 oder 1</div>
+      </div>
+
+      <div class="raw-bits" id="raw-bits"></div>
+
+      <button type="button" class="copy-btn is-hidden" id="copy-bits" aria-label="Binärcode kopieren" title="Binärcode kopieren">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+        </svg>
+        <span></span>
+      </button>
+    </div>
+  </main>
+
+  <footer>
+    <button type="button" class="touch-bit touch-action" id="btn-clear" aria-label="Komplett löschen" title="Komplett löschen" disabled>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+    <button type="button" class="touch-bit" id="btn-0" aria-label="Null eingeben">0</button>
+    <button type="button" class="touch-bit" id="btn-1" aria-label="Eins eingeben">1</button>
+    <button type="button" class="touch-bit touch-action" id="btn-back" aria-label="Letztes Bit löschen" title="Letztes Bit löschen" disabled>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/>
+      </svg>
+    </button>
+  </footer>
+
+  <div class="tip-popup" id="tip-popup" role="tooltip"></div>
+
+  <script>
+    (() => {
+      let bits = "";
+      let arch = "6502";
+      let level = "asm";
+      let lang = "en";
+      let copyableOutput = "";
+
+      const I18N = {
+        en: {
+          title: "0 / 1 — Architecture & Layers",
+          prompt: "type 0 or 1",
+          bitLabel: (b, by, rem, miss) => `${b} bit · ${by} byte${rem ? ` · ${miss} left` : ""}`,
+          pendingBits: (n) => `${n} more bit${n === 1 ? "" : "s"}`,
+          pendingRgb: (n) => `${n} more bit${n === 1 ? "" : "s"} for 1 pixel`,
+          pendingHsl: (n) => `${n} more bit${n === 1 ? "" : "s"} for 1 HSL color`,
+          moreBytes: (n) => `… (${n} more byte${n === 1 ? "" : "s"})`,
+          moreBytesShort: (n) => `… ${n} more byte${n === 1 ? "" : "s"}`,
+          moreByte16: "… (1 more byte for 16-bit instruction)",
+          moreByteModrm: "… (1 more ModR/M byte)",
+          invalidOpcode: (op) => `invalid opcode $${op}`,
+          unknownOp: (op) => `unknown $${op}`,
+          memAddr: "8086 memory addressing",
+          copied: "copied",
+          utf8Placeholder: "type text here → binary",
+          utf8Aria: "Convert text to UTF-8 binary",
+          copyOut: "Copy translation",
+          copyBits: "Copy binary",
+          clearAll: "Clear all",
+          delBit: "Delete last bit",
+          zero: "Enter zero",
+          one: "Enter one",
+          errInvalidOp: (b, a) => `No documented instruction for opcode $${b} (${a}).`,
+          errZ80Prefix: (b) => `Z80 prefix byte $${b}: starts an extended multi-byte instruction (not mapped here).`,
+          errChip8: (op) => `No valid CHIP-8 instruction for 16-bit opcode $${op}.`,
+          errPending: "Instruction needs more bytes to be complete.",
+          errUtf8Partial: (n) => `Incomplete UTF-8 character: ${n} more byte${n === 1 ? "" : "s"} needed.`,
+          errCtrlChar: (b) => `Control character (0x${b}), not a printable glyph.`,
+          errUtf8Cont: (b) => `Invalid UTF-8: byte 0x${b} starts with 10… (continuation byte without a start byte).`,
+          errUtf8Forbid: (b) => `Invalid UTF-8: byte 0x${b} is forbidden in the UTF-8 standard.`,
+          errUtf8Seq: (s) => `Invalid UTF-8 sequence (${s}).`,
+          cats: {
+            load: "load", store: "store", add: "add", sub: "subtract", logic: "logic",
+            shift: "bitshift", cmp: "compare", jump: "jump", xfer: "transfer",
+            flag: "flag / stack", gfx: "graphics", ctrl: "control", math: "arithmetic",
+            mem: "memory", prefix: "prefix", invalid: "invalid", incomplete: "incomplete"
+          },
+          archTips: {
+            "6502": "MOS 6502 (1975) · 8-bit CPU (C64, NES, Apple II). Variable length: 1–3 bytes.",
+            "z80": "Zilog Z80 (1976) · 8-bit CPU (Game Boy family, ZX Spectrum). Different opcode table.",
+            "chip8": "CHIP-8 (1977) · Minimalist virtual machine. Every instruction is fixed 16-bit (2 bytes).",
+            "8086": "Intel 8086 (1978) · 16-bit CPU, ancestor of modern PCs (x86). Wider 16-bit registers.",
+            "utf8": "UTF-8 · Global text standard (1–4 bytes per character). Independent of CPU.",
+            "hex": "Hexdump · Raw byte view: shows each byte in hex, decimal, and ASCII.",
+            "rgb": "24-bit RGB · Additive light model: 8 bits each for Red, Green, and Blue per pixel.",
+            "hsl": "24-bit HSL · Perceptual color space: 8 bits each for Hue (°), Saturation (%), Lightness (%)."
+          },
+          levelTips: {
+            "asm": "Assembler · Direct human-readable mnemonics for this CPU's machine instructions.",
+            "cpp": "C++ · Systems-level view showing the functional equivalent of decoded instructions.",
+            "py": "Python · High-level view showing the same logic with explicit bit masking."
+          }
+        },
+        de: {
+          title: "0 / 1 — Architektur & Ebenen",
+          prompt: "tippe 0 oder 1",
+          bitLabel: (b, by, rem, miss) => `${b} Bit · ${by} Byte${rem ? ` · noch ${miss}` : ""}`,
+          pendingBits: (n) => `noch ${n} Bit`,
+          pendingRgb: (n) => `noch ${n} Bit für 1 Pixel`,
+          pendingHsl: (n) => `noch ${n} Bit für 1 HSL-Farbe`,
+          moreBytes: (n) => `… (noch ${n} Byte)`,
+          moreBytesShort: (n) => `… noch ${n} Byte`,
+          moreByte16: "… (noch 1 Byte für 16-Bit-Befehl)",
+          moreByteModrm: "… (noch 1 Byte ModR/M)",
+          invalidOpcode: (op) => `ungültiger Opcode $${op}`,
+          unknownOp: (op) => `unbekannt $${op}`,
+          memAddr: "8086 Speicher-Adressierung",
+          copied: "kopiert",
+          utf8Placeholder: "Text hier tippen → Binärcode",
+          utf8Aria: "Text in UTF-8-Binärcode übersetzen",
+          copyOut: "Übersetzung kopieren",
+          copyBits: "Binärcode kopieren",
+          clearAll: "Komplett löschen",
+          delBit: "Letztes Bit löschen",
+          zero: "Null eingeben",
+          one: "Eins eingeben",
+          errInvalidOp: (b, a) => `Kein dokumentierter Befehl für Opcode $${b} (${a}).`,
+          errZ80Prefix: (b) => `Z80-Präfix-Byte $${b}: leitet einen erweiterten Mehrbyte-Befehl ein (hier nicht abgebildet).`,
+          errChip8: (op) => `Kein gültiger CHIP-8-Befehl für 16-Bit-Opcode $${op}.`,
+          errPending: "Befehl benötigt noch weitere Bytes, um vollständig zu sein.",
+          errUtf8Partial: (n) => `Unvollständiges UTF-8-Zeichen: es fehlen noch ${n} Byte.`,
+          errCtrlChar: (b) => `Steuerzeichen (0x${b}), kein sichtbares Schriftzeichen.`,
+          errUtf8Cont: (b) => `Ungültiges UTF-8: Byte 0x${b} beginnt mit 10… (Folge-Byte ohne Start-Byte).`,
+          errUtf8Forbid: (b) => `Ungültiges UTF-8: Byte 0x${b} ist im UTF-8-Standard verboten.`,
+          errUtf8Seq: (s) => `Ungültige UTF-8-Sequenz (${s}).`,
+          cats: {
+            load: "laden", store: "speichern", add: "addition", sub: "subtraktion", logic: "logik",
+            shift: "bitshift", cmp: "vergleich", jump: "sprung", xfer: "transfer",
+            flag: "flag / stack", gfx: "grafik", ctrl: "steuerung", math: "arithmetik",
+            mem: "speicher", prefix: "präfix", invalid: "ungültig", incomplete: "unvollständig"
+          },
+          archTips: {
+            "6502": "MOS 6502 (1975) · 8-Bit-Prozessor (C64, NES, Apple II). Variable Befehlslänge: 1–3 Byte.",
+            "z80": "Zilog Z80 (1976) · 8-Bit-Prozessor (Game-Boy-Familie, ZX Spectrum). Eigenes Opcode-Wörterbuch.",
+            "chip8": "CHIP-8 (1977) · Minimalistische virtuelle Maschine. Jeder Befehl ist exakt 16 Bit (2 Byte) lang.",
+            "8086": "Intel 8086 (1978) · 16-Bit-Prozessor, Urvater moderner Windows-PCs (x86). Größere 16-Bit-Register.",
+            "utf8": "UTF-8 · Weltweiter Textstandard (1–4 Byte pro Zeichen). Unabhängig vom Prozessor.",
+            "hex": "Hexdump · Rohe Byte-Ansicht: zeigt jedes Byte als Hexadezimalwert, Dezimalzahl und ASCII-Zeichen.",
+            "rgb": "24-Bit RGB · Additives Lichtmodell: je 8 Bit für Rot, Grün und Blau pro Pixel.",
+            "hsl": "24-Bit HSL · Wahrnehmungs-Farbraum: je 8 Bit für Farbton (°), Sättigung (%) und Helligkeit (%)."
+          },
+          levelTips: {
+            "asm": "Assembler · Direkte, lesbare Schreibweise der Maschinenbefehle dieses Prozessors.",
+            "cpp": "C++ · Systemnahe Hochsprache – zeigt die funktionale Entsprechung der erkannten CPU-Befehle.",
+            "py": "Python · Hochsprache – zeigt dieselbe Logik mit explizitem Bit-Überlauf."
+          }
+        }
+      };
+
+      const t = () => I18N[lang];
+
+      const stageEl = document.getElementById("stage-output");
+      const dotsEl = document.getElementById("dots");
+      const counterEl = document.getElementById("bit-counter");
+      const rawEl = document.getElementById("raw-bits");
+      const levelAxisEl = document.getElementById("level-axis");
+      const tipEl = document.getElementById("tip-popup");
+      const btnBack = document.getElementById("btn-back");
+      const btnClear = document.getElementById("btn-clear");
+      const btn0 = document.getElementById("btn-0");
+      const btn1 = document.getElementById("btn-1");
+      const copyOutputBtn = document.getElementById("copy-output");
+      const copyBitsBtn = document.getElementById("copy-bits");
+      const utf8 = new TextDecoder("utf-8", { fatal: false });
+      const utf8Encoder = new TextEncoder();
+      const hex2 = (n) => n.toString(16).padStart(2, "0").toUpperCase();
+      const hex4 = (n) => n.toString(16).padStart(4, "0").toUpperCase();
+
+      function getCategoryKey(mnem) {
+        if (["LDA", "LDX", "LDY", "LD"].includes(mnem)) return "load";
+        if (["STA", "STX", "STY"].includes(mnem)) return "store";
+        if (["ADC", "ADD", "INC", "INX", "INY"].includes(mnem)) return "add";
+        if (["SBC", "SUB", "DEC", "DEX", "DEY"].includes(mnem)) return "sub";
+        if (["AND", "ORA", "OR", "EOR", "XOR", "CPL"].includes(mnem)) return "logic";
+        if (["ASL", "LSR", "ROL", "ROR"].includes(mnem)) return "shift";
+        if (["CMP", "CPX", "CPY", "CP", "BIT", "SE", "SNE"].includes(mnem)) return "cmp";
+        if (["JMP", "JP", "JR", "JSR", "CALL", "RTS", "RET", "RTI", "BPL", "BMI", "BVC", "BVS", "BCC", "BCS", "BEQ", "BNE", "DJNZ"].includes(mnem)) return "jump";
+        if (["TAX", "TXA", "TAY", "TYA", "TSX", "TXS"].includes(mnem)) return "xfer";
+        if (["PHA", "PLA", "PHP", "PLP", "CLC", "SEC", "CLI", "SEI", "CLV", "CLD", "SED", "SCF", "CCF", "DI", "EI"].includes(mnem)) return "flag";
+        if (["CLS", "DRW"].includes(mnem)) return "gfx";
+        if (["NOP", "BRK", "HALT"].includes(mnem)) return "ctrl";
+        return "";
+      }
+
+      function getCategory(mnem) {
+        const k = getCategoryKey(mnem);
+        return k ? t().cats[k] : "";
+      }
+
+      function showTip(target, text) {
+        const rect = target.getBoundingClientRect();
+        tipEl.textContent = text;
+        const x = Math.max(155, Math.min(window.innerWidth - 155, rect.left + rect.width / 2));
+        const showBelow = rect.top < 72;
+        tipEl.style.left = `${x}px`;
+        tipEl.style.top = showBelow ? `${rect.bottom}px` : `${rect.top}px`;
+        tipEl.style.transform = showBelow ? "translate(-50%, 8px)" : "translate(-50%, -100%) translateY(-6px)";
+        tipEl.classList.add("is-visible");
+      }
+
+      function hideTip() {
+        tipEl.classList.remove("is-visible");
+      }
+
+      function attachTip(el, textOrFn) {
+        el.addEventListener("mouseenter", () => showTip(el, typeof textOrFn === "function" ? textOrFn() : textOrFn));
+        el.addEventListener("mouseleave", hideTip);
+      }
+
+      function explainUtf8Error(slice) {
+        const b0 = slice[0];
+        if ((b0 & 0xc0) === 0x80) return t().errUtf8Cont(hex2(b0));
+        if (b0 >= 0xf5 || b0 === 0xc0 || b0 === 0xc1) return t().errUtf8Forbid(hex2(b0));
+        return t().errUtf8Seq(slice.map((b) => "0x" + hex2(b)).join(" "));
+      }
+
+      async function copyText(btn, text) {
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+          const label = btn.querySelector("span");
+          btn.classList.add("is-copied");
+          if (label) label.textContent = t().copied;
+          setTimeout(() => {
+            btn.classList.remove("is-copied");
+            if (label) label.textContent = "";
+          }, 1100);
+        } catch {
+          // Clipboard permission denied
+        }
+      }
+
+      // --- 1. MOS 6502 ---
+      const OPCODES_6502 = {
+        0x00: ["BRK", "imp", 1], 0x01: ["ORA", "izx", 2], 0x05: ["ORA", "zp", 2], 0x06: ["ASL", "zp", 2],
+        0x08: ["PHP", "imp", 1], 0x09: ["ORA", "imm", 2], 0x0A: ["ASL", "acc", 1], 0x0D: ["ORA", "abs", 3],
+        0x0E: ["ASL", "abs", 3], 0x10: ["BPL", "rel", 2], 0x11: ["ORA", "izy", 2], 0x15: ["ORA", "zpx", 2],
+        0x16: ["ASL", "zpx", 2], 0x18: ["CLC", "imp", 1], 0x19: ["ORA", "aby", 3], 0x1D: ["ORA", "abx", 3],
+        0x1E: ["ASL", "abx", 3], 0x20: ["JSR", "abs", 3], 0x21: ["AND", "izx", 2], 0x24: ["BIT", "zp", 2],
+        0x25: ["AND", "zp", 2], 0x26: ["ROL", "zp", 2], 0x28: ["PLP", "imp", 1], 0x29: ["AND", "imm", 2],
+        0x2A: ["ROL", "acc", 1], 0x2C: ["BIT", "abs", 3], 0x2D: ["AND", "abs", 3], 0x2E: ["ROL", "abs", 3],
+        0x30: ["BMI", "rel", 2], 0x31: ["AND", "izy", 2], 0x35: ["AND", "zpx", 2], 0x36: ["ROL", "zpx", 2],
+        0x38: ["SEC", "imp", 1], 0x39: ["AND", "aby", 3], 0x3D: ["AND", "abx", 3], 0x3E: ["ROL", "abx", 3],
+        0x40: ["RTI", "imp", 1], 0x41: ["EOR", "izx", 2], 0x45: ["EOR", "zp", 2], 0x46: ["LSR", "zp", 2],
+        0x48: ["PHA", "imp", 1], 0x49: ["EOR", "imm", 2], 0x4A: ["LSR", "acc", 1], 0x4C: ["JMP", "abs", 3],
+        0x4D: ["EOR", "abs", 3], 0x4E: ["LSR", "abs", 3], 0x50: ["BVC", "rel", 2], 0x51: ["EOR", "izy", 2],
+        0x55: ["EOR", "zpx", 2], 0x56: ["LSR", "zpx", 2], 0x58: ["CLI", "imp", 1], 0x59: ["EOR", "aby", 3],
+        0x5D: ["EOR", "abx", 3], 0x5E: ["LSR", "abx", 3], 0x60: ["RTS", "imp", 1], 0x61: ["ADC", "izx", 2],
+        0x65: ["ADC", "zp", 2], 0x66: ["ROR", "zp", 2], 0x68: ["PLA", "imp", 1], 0x69: ["ADC", "imm", 2],
+        0x6A: ["ROR", "acc", 1], 0x6C: ["JMP", "ind", 3], 0x6D: ["ADC", "abs", 3], 0x6E: ["ROR", "abs", 3],
+        0x70: ["BVS", "rel", 2], 0x71: ["ADC", "izy", 2], 0x75: ["ADC", "zpx", 2], 0x76: ["ROR", "zpx", 2],
+        0x78: ["SEI", "imp", 1], 0x79: ["ADC", "aby", 3], 0x7D: ["ADC", "abx", 3], 0x7E: ["ROR", "abx", 3],
+        0x81: ["STA", "izx", 2], 0x84: ["STY", "zp", 2], 0x85: ["STA", "zp", 2], 0x86: ["STX", "zp", 2],
+        0x88: ["DEY", "imp", 1], 0x8A: ["TXA", "imp", 1], 0x8C: ["STY", "abs", 3], 0x8D: ["STA", "abs", 3],
+        0x8E: ["STX", "abs", 3], 0x90: ["BCC", "rel", 2], 0x91: ["STA", "izy", 2], 0x94: ["STY", "zpx", 2],
+        0x95: ["STA", "zpx", 2], 0x96: ["STX", "zpy", 2], 0x98: ["TYA", "imp", 1], 0x99: ["STA", "aby", 3],
+        0x9A: ["TXS", "imp", 1], 0x9D: ["STA", "abx", 3], 0xA0: ["LDY", "imm", 2], 0xA1: ["LDA", "izx", 2],
+        0xA2: ["LDX", "imm", 2], 0xA4: ["LDY", "zp", 2], 0xA5: ["LDA", "zp", 2], 0xA6: ["LDX", "zp", 2],
+        0xA8: ["TAY", "imp", 1], 0xA9: ["LDA", "imm", 2], 0xAA: ["TAX", "imp", 1], 0xAC: ["LDY", "abs", 3],
+        0xAD: ["LDA", "abs", 3], 0xAE: ["LDX", "abs", 3], 0xB0: ["BCS", "rel", 2], 0xB1: ["LDA", "izy", 2],
+        0xB4: ["LDY", "zpx", 2], 0xB5: ["LDA", "zpx", 2], 0xB6: ["LDX", "zpy", 2], 0xB8: ["CLV", "imp", 1],
+        0xB9: ["LDA", "aby", 3], 0xBA: ["TSX", "imp", 1], 0xBC: ["LDY", "abx", 3], 0xBD: ["LDA", "abx", 3],
+        0xBE: ["LDX", "aby", 3], 0xC0: ["CPY", "imm", 2], 0xC1: ["CMP", "izx", 2], 0xC4: ["CPY", "zp", 2],
+        0xC5: ["CMP", "zp", 2], 0xC6: ["DEC", "zp", 2], 0xC8: ["INY", "imp", 1], 0xC9: ["CMP", "imm", 2],
+        0xCA: ["DEX", "imp", 1], 0xCC: ["CPY", "abs", 3], 0xCD: ["CMP", "abs", 3], 0xCE: ["DEC", "abs", 3],
+        0xD0: ["BNE", "rel", 2], 0xD1: ["CMP", "izy", 2], 0xD5: ["CMP", "zpx", 2], 0xD6: ["DEC", "zpx", 2],
+        0xD8: ["CLD", "imp", 1], 0xD9: ["CMP", "aby", 3], 0xDD: ["CMP", "abx", 3], 0xDE: ["DEC", "abx", 3],
+        0xE0: ["CPX", "imm", 2], 0xE1: ["SBC", "izx", 2], 0xE4: ["CPX", "zp", 2], 0xE5: ["SBC", "zp", 2],
+        0xE6: ["INC", "zp", 2], 0xE8: ["INX", "imp", 1], 0xE9: ["SBC", "imm", 2], 0xEA: ["NOP", "imp", 1],
+        0xEC: ["CPX", "abs", 3], 0xED: ["SBC", "abs", 3], 0xEE: ["INC", "abs", 3], 0xF0: ["BEQ", "rel", 2],
+        0xF1: ["SBC", "izy", 2], 0xF5: ["SBC", "zpx", 2], 0xF6: ["INC", "zpx", 2], 0xF8: ["SED", "imp", 1],
+        0xF9: ["SBC", "aby", 3], 0xFD: ["SBC", "abx", 3], 0xFE: ["INC", "abx", 3]
+      };
+
+      function fmt6502Op(m, s) {
+        const b1 = s[1], b2 = s[2];
+        if (m === "imp") return "";
+        if (m === "acc") return "A";
+        if (m === "imm") return `#$${hex2(b1)}`;
+        if (m === "zp") return `$${hex2(b1)}`;
+        if (m === "zpx") return `$${hex2(b1)},X`;
+        if (m === "zpy") return `$${hex2(b1)},Y`;
+        if (m === "izx") return `($${hex2(b1)},X)`;
+        if (m === "izy") return `($${hex2(b1)}),Y`;
+        if (m === "rel") return `$${hex2(b1)}`;
+        if (m === "abs") return `$${hex2(b2)}${hex2(b1)}`;
+        if (m === "abx") return `$${hex2(b2)}${hex2(b1)},X`;
+        if (m === "aby") return `$${hex2(b2)}${hex2(b1)},Y`;
+        if (m === "ind") return `($${hex2(b2)}${hex2(b1)})`;
+        return "";
+      }
+
+      function lift6502(mnem, am, slice) {
+        const arg = slice[1] ?? 0;
+        const h = `0x${hex2(arg)}`;
+        if (mnem === "LDA" && am === "imm") return { cpp: `A = ${h};`, py: `A = ${h}` };
+        if (mnem === "LDA" && am === "zp")  return { cpp: `A = mem[${h}];`, py: `A = mem[${h}]` };
+        if (mnem === "LDX" && am === "imm") return { cpp: `X = ${h};`, py: `X = ${h}` };
+        if (mnem === "LDY" && am === "imm") return { cpp: `Y = ${h};`, py: `Y = ${h}` };
+        if (mnem === "STA" && am === "zp")  return { cpp: `mem[${h}] = A;`, py: `mem[${h}] = A` };
+        if (mnem === "STX" && am === "zp")  return { cpp: `mem[${h}] = X;`, py: `mem[${h}] = X` };
+        if (mnem === "STY" && am === "zp")  return { cpp: `mem[${h}] = Y;`, py: `mem[${h}] = Y` };
+        if (mnem === "ADC" && am === "imm") return { cpp: `A = (uint8_t)(A + ${h} + C);`, py: `A = (A + ${h} + C) & 0xFF` };
+        if (mnem === "SBC" && am === "imm") return { cpp: `A = (uint8_t)(A - ${h} - (1 - C));`, py: `A = (A - ${h} - (1 - C)) & 0xFF` };
+        if (mnem === "AND" && am === "imm") return { cpp: `A &= ${h};`, py: `A &= ${h}` };
+        if (mnem === "ORA" && am === "imm") return { cpp: `A |= ${h};`, py: `A |= ${h}` };
+        if (mnem === "EOR" && am === "imm") return { cpp: `A ^= ${h};`, py: `A ^= ${h}` };
+        if (mnem === "INX") return { cpp: `X++;`, py: `X = (X + 1) & 0xFF` };
+        if (mnem === "INY") return { cpp: `Y++;`, py: `Y = (Y + 1) & 0xFF` };
+        if (mnem === "DEX") return { cpp: `X--;`, py: `X = (X - 1) & 0xFF` };
+        if (mnem === "DEY") return { cpp: `Y--;`, py: `Y = (Y - 1) & 0xFF` };
+        if (mnem === "TAX") return { cpp: `X = A;`, py: `X = A` };
+        if (mnem === "TXA") return { cpp: `A = X;`, py: `A = X` };
+        if (mnem === "TAY") return { cpp: `Y = A;`, py: `Y = A` };
+        if (mnem === "TYA") return { cpp: `A = Y;`, py: `A = Y` };
+        if (mnem === "ASL" && am === "acc") return { cpp: `A <<= 1;`, py: `A = (A << 1) & 0xFF` };
+        if (mnem === "LSR" && am === "acc") return { cpp: `A >>= 1;`, py: `A >>= 1` };
+        if (mnem === "CLC") return { cpp: `C = 0;`, py: `C = 0` };
+        if (mnem === "SEC") return { cpp: `C = 1;`, py: `C = 1` };
+        if (mnem === "NOP") return { cpp: `/* nop */`, py: `pass  # nop` };
+        const opText = fmt6502Op(am, slice);
+        const asm = opText ? `${mnem} ${opText}` : mnem;
+        return { cpp: `/* 6502: ${asm} */`, py: `# 6502: ${asm}` };
+      }
+
+      function run6502(bytes) {
+        let A = 0, X = 0, Y = 0, C = 0, Z = 1, N = 0;
+        const zp = new Uint8Array(256);
+        const lines = [];
+        let i = 0;
+        const updNZ = (v) => { Z = (v & 0xff) === 0 ? 1 : 0; N = (v & 0x80) !== 0 ? 1 : 0; };
+
+        while (i < bytes.length) {
+          const op = bytes[i];
+          const spec = OPCODES_6502[op];
+          if (!spec) {
+            lines.push({ asm: `??? ($${hex2(op)})`, cpp: `// ungültiger Opcode $${hex2(op)}`, py: `# ungültiger Opcode $${hex2(op)}`, cat: "ungültig", invalid: true, indices: [i] });
+            i++; continue;
+          }
+          const [mnem, am, len] = spec;
+          if (i + len > bytes.length) {
+            const need = i + len - bytes.length;
+            const indices = Array.from({ length: bytes.length - i }, (_, k) => i + k);
+            lines.push({ asm: `${mnem} … (noch ${need} Byte)`, cpp: `// … noch ${need} Byte`, py: `# … noch ${need} Byte`, cat: getCategory(mnem), pending: true, indices });
+            break;
+          }
+          const slice = bytes.slice(i, i + len);
+          const operand = fmt6502Op(am, slice);
+          const asm = operand ? `${mnem} ${operand}` : mnem;
+          const lifted = lift6502(mnem, am, slice);
+          const indices = Array.from({ length: len }, (_, k) => i + k);
+          lines.push({ asm, cpp: lifted.cpp, py: lifted.py, cat: getCategory(mnem), indices });
+
+          const arg = slice[1] ?? 0;
+          if (mnem === "LDA" && am === "imm") { A = arg; updNZ(A); }
+          else if (mnem === "LDA" && am === "zp") { A = zp[arg]; updNZ(A); }
+          else if (mnem === "LDX" && am === "imm") { X = arg; updNZ(X); }
+          else if (mnem === "LDY" && am === "imm") { Y = arg; updNZ(Y); }
+          else if (mnem === "STA" && am === "zp") { zp[arg] = A; }
+          else if (mnem === "STX" && am === "zp") { zp[arg] = X; }
+          else if (mnem === "STY" && am === "zp") { zp[arg] = Y; }
+          else if (mnem === "ADC" && am === "imm") { const s = A + arg + C; C = s > 0xff ? 1 : 0; A = s & 0xff; updNZ(A); }
+          else if (mnem === "SBC" && am === "imm") { const d = A - arg - (1 - C); C = d >= 0 ? 1 : 0; A = d & 0xff; updNZ(A); }
+          else if (mnem === "AND" && am === "imm") { A &= arg; updNZ(A); }
+          else if (mnem === "ORA" && am === "imm") { A |= arg; updNZ(A); }
+          else if (mnem === "EOR" && am === "imm") { A ^= arg; updNZ(A); }
+          else if (mnem === "INX") { X = (X + 1) & 0xff; updNZ(X); }
+          else if (mnem === "INY") { Y = (Y + 1) & 0xff; updNZ(Y); }
+          else if (mnem === "DEX") { X = (X - 1) & 0xff; updNZ(X); }
+          else if (mnem === "DEY") { Y = (Y - 1) & 0xff; updNZ(Y); }
+          else if (mnem === "TAX") { X = A; updNZ(X); }
+          else if (mnem === "TXA") { A = X; updNZ(A); }
+          else if (mnem === "TAY") { Y = A; updNZ(Y); }
+          else if (mnem === "TYA") { A = Y; updNZ(A); }
+          else if (mnem === "ASL" && am === "acc") { C = (A & 0x80) ? 1 : 0; A = (A << 1) & 0xff; updNZ(A); }
+          else if (mnem === "LSR" && am === "acc") { C = A & 1; A >>= 1; updNZ(A); }
+          else if (mnem === "CLC") C = 0;
+          else if (mnem === "SEC") C = 1;
+          i += len;
+        }
+        return {
+          lines,
+          status: [
+            `A <strong>${A.toString(2).padStart(8, "0")}</strong> (${A})`,
+            `X <strong>${X}</strong>`,
+            `Y <strong>${Y}</strong>`,
+            `C:${C} Z:${Z} N:${N}`
+          ]
+        };
+      }
+
+      // --- 2. Zilog Z80 ---
+      const Z80_REGS = ["B", "C", "D", "E", "H", "L", "(HL)", "A"];
+      function runZ80(bytes) {
+        const R = { A: 0, B: 0, C: 0, D: 0, E: 0, H: 0, L: 0 };
+        let CF = 0;
+        const lines = [];
+        let i = 0;
+
+        while (i < bytes.length) {
+          const op = bytes[i];
+          let len = 1, asm = "", cpp = "", py = "", cat = "", invalid = false;
+
+          if (op === 0x00) { asm = "NOP"; cpp = "/* nop */"; py = "pass  # nop"; cat = "steuerung"; }
+          else if (op === 0x76) { asm = "HALT"; cpp = "return; // halt"; py = "raise SystemExit  # halt"; cat = "steuerung"; }
+          else if (op === 0x3C) { asm = "INC A"; cpp = "A++;"; py = "A = (A + 1) & 0xFF"; R.A = (R.A + 1) & 0xFF; cat = "addition"; }
+          else if (op === 0x3D) { asm = "DEC A"; cpp = "A--;"; py = "A = (A - 1) & 0xFF"; R.A = (R.A - 1) & 0xFF; cat = "subtraktion"; }
+          else if (op === 0x04) { asm = "INC B"; cpp = "B++;"; py = "B = (B + 1) & 0xFF"; R.B = (R.B + 1) & 0xFF; cat = "addition"; }
+          else if (op === 0x05) { asm = "DEC B"; cpp = "B--;"; py = "B = (B - 1) & 0xFF"; R.B = (R.B - 1) & 0xFF; cat = "subtraktion"; }
+          else if (op === 0x0C) { asm = "INC C"; cpp = "C++;"; py = "C = (C + 1) & 0xFF"; R.C = (R.C + 1) & 0xFF; cat = "addition"; }
+          else if (op === 0x0D) { asm = "DEC C"; cpp = "C--;"; py = "C = (C - 1) & 0xFF"; R.C = (R.C - 1) & 0xFF; cat = "subtraktion"; }
+          else if (op === 0x2F) { asm = "CPL"; cpp = "A = ~A;"; py = "A = (~A) & 0xFF"; R.A = (~R.A) & 0xFF; cat = "logik"; }
+          else if (op === 0x37) { asm = "SCF"; cpp = "C_flag = 1;"; py = "C_flag = 1"; CF = 1; cat = "flag / stack"; }
+          else if (op === 0x3F) { asm = "CCF"; cpp = "C_flag ^= 1;"; py = "C_flag ^= 1"; CF ^= 1; cat = "flag / stack"; }
+          else if (op === 0xC9) { asm = "RET"; cpp = "return;"; py = "return"; cat = "sprung"; }
+          else if (op === 0xF3) { asm = "DI"; cpp = "/* disable interrupts */"; py = "# disable interrupts"; cat = "flag / stack"; }
+          else if (op === 0xFB) { asm = "EI"; cpp = "/* enable interrupts */"; py = "# enable interrupts"; cat = "flag / stack"; }
+          else if (op >= 0x40 && op <= 0x7F) {
+            const dst = Z80_REGS[(op >> 3) & 7];
+            const src = Z80_REGS[op & 7];
+            const dExpr = dst === "(HL)" ? "mem[HL]" : dst;
+            const sExpr = src === "(HL)" ? "mem[HL]" : src;
+            asm = `LD ${dst}, ${src}`;
+            cpp = `${dExpr} = ${sExpr};`;
+            py = `${dExpr} = ${sExpr}`;
+            cat = "laden";
+            if (R[dst] !== undefined && R[src] !== undefined) R[dst] = R[src];
+          }
+          else if (op >= 0x80 && op <= 0xBF) {
+            const src = Z80_REGS[op & 7];
+            const sExpr = src === "(HL)" ? "mem[HL]" : src;
+            const grp = (op >> 3) & 7;
+            const ops = ["ADD A,", "ADC A,", "SUB", "SBC A,", "AND", "XOR", "OR", "CP"];
+            const cats = ["addition", "addition", "subtraktion", "subtraktion", "logik", "logik", "logik", "vergleich"];
+            asm = `${ops[grp]} ${src}`;
+            cat = cats[grp];
+            const v = R[src] ?? 0;
+            if (grp === 0) { cpp = `A += ${sExpr};`; py = `A = (A + ${sExpr}) & 0xFF`; R.A = (R.A + v) & 0xFF; }
+            else if (grp === 2) { cpp = `A -= ${sExpr};`; py = `A = (A - ${sExpr}) & 0xFF`; R.A = (R.A - v) & 0xFF; }
+            else if (grp === 4) { cpp = `A &= ${sExpr};`; py = `A &= ${sExpr}`; R.A &= v; }
+            else if (grp === 5) { cpp = `A ^= ${sExpr};`; py = `A ^= ${sExpr}`; R.A ^= v; }
+            else if (grp === 6) { cpp = `A |= ${sExpr};`; py = `A |= ${sExpr}`; R.A |= v; }
+            else { cpp = `/* z80: ${asm} */`; py = `# z80: ${asm}`; }
+          }
+          else if ([0x06, 0x0E, 0x16, 0x1E, 0x26, 0x2E, 0x3E, 0xC6, 0xCE, 0xD6, 0xDE, 0xE6, 0xEE, 0xF6, 0xFE, 0x18, 0x10].includes(op)) {
+            len = 2;
+            if (i + len > bytes.length) {
+              const indices = Array.from({ length: bytes.length - i }, (_, k) => i + k);
+              lines.push({ asm: `Z80 ($${hex2(op)}) … (noch 1 Byte)`, cpp: "// … noch 1 Byte", py: "# … noch 1 Byte", cat: "unvollständig", pending: true, indices });
+              break;
+            }
+            const n = bytes[i + 1];
+            const h = `0x${hex2(n)}`;
+            const ldMap = { 0x06: "B", 0x0E: "C", 0x16: "D", 0x1E: "E", 0x26: "H", 0x2E: "L", 0x3E: "A" };
+            if (ldMap[op]) {
+              const reg = ldMap[op];
+              asm = `LD ${reg}, $${hex2(n)}`;
+              cpp = `${reg} = ${h};`;
+              py = `${reg} = ${h}`;
+              cat = "laden";
+              R[reg] = n;
+            } else if (op === 0xC6) { asm = `ADD A, $${hex2(n)}`; cpp = `A += ${h};`; py = `A = (A + ${h}) & 0xFF`; R.A = (R.A + n) & 0xFF; cat = "addition"; }
+            else if (op === 0xD6) { asm = `SUB $${hex2(n)}`; cpp = `A -= ${h};`; py = `A = (A - ${h}) & 0xFF`; R.A = (R.A - n) & 0xFF; cat = "subtraktion"; }
+            else if (op === 0xE6) { asm = `AND $${hex2(n)}`; cpp = `A &= ${h};`; py = `A &= ${h}`; R.A &= n; cat = "logik"; }
+            else if (op === 0xF6) { asm = `OR $${hex2(n)}`; cpp = `A |= ${h};`; py = `A |= ${h}`; R.A |= n; cat = "logik"; }
+            else if (op === 0xEE) { asm = `XOR $${hex2(n)}`; cpp = `A ^= ${h};`; py = `A ^= ${h}`; R.A ^= n; cat = "logik"; }
+            else if (op === 0xFE) { asm = `CP $${hex2(n)}`; cpp = `/* compare A, ${h} */`; py = `# compare A, ${h}`; cat = "vergleich"; }
+            else if (op === 0x18 || op === 0x10) { asm = `${op === 0x18 ? "JR" : "DJNZ"} $${hex2(n)}`; cpp = `goto offset_${h};`; py = `# jump relative ${h}`; cat = "sprung"; }
+            else { asm = `OP $${hex2(op)}, $${hex2(n)}`; cpp = `/* z80: ${asm} */`; py = `# z80: ${asm}`; cat = "arithmetik"; }
+          }
+          else if ([0x01, 0x11, 0x21, 0x31, 0xC3, 0xCD].includes(op)) {
+            len = 3;
+            if (i + len > bytes.length) {
+              const need = i + len - bytes.length;
+              const indices = Array.from({ length: bytes.length - i }, (_, k) => i + k);
+              lines.push({ asm: `Z80 ($${hex2(op)}) … (noch ${need} Byte)`, cpp: `// … noch ${need} Byte`, py: `# … noch ${need} Byte`, cat: "unvollständig", pending: true, indices });
+              break;
+            }
+            const nn = (bytes[i + 2] << 8) | bytes[i + 1];
+            const h4 = `0x${hex4(nn)}`;
+            if (op === 0x01) { asm = `LD BC, $${hex4(nn)}`; cpp = `BC = ${h4};`; py = `BC = ${h4}`; R.B = bytes[i + 2]; R.C = bytes[i + 1]; cat = "laden"; }
+            else if (op === 0x11) { asm = `LD DE, $${hex4(nn)}`; cpp = `DE = ${h4};`; py = `DE = ${h4}`; R.D = bytes[i + 2]; R.E = bytes[i + 1]; cat = "laden"; }
+            else if (op === 0x21) { asm = `LD HL, $${hex4(nn)}`; cpp = `HL = ${h4};`; py = `HL = ${h4}`; R.H = bytes[i + 2]; R.L = bytes[i + 1]; cat = "laden"; }
+            else if (op === 0x31) { asm = `LD SP, $${hex4(nn)}`; cpp = `SP = ${h4};`; py = `SP = ${h4}`; cat = "laden"; }
+            else if (op === 0xC3) { asm = `JP $${hex4(nn)}`; cpp = `goto addr_${h4};`; py = `# jump ${h4}`; cat = "sprung"; }
+            else if (op === 0xCD) { asm = `CALL $${hex4(nn)}`; cpp = `fn_${h4}();`; py = `fn_${h4}()`; cat = "sprung"; }
+          } else {
+            asm = `??? ($${hex2(op)})`;
+            cpp = `/* Z80 Prefix/Opcode $${hex2(op)} */`;
+            py = `# Z80 Prefix/Opcode $${hex2(op)}`;
+            cat = [0xCB, 0xDD, 0xED, 0xFD].includes(op) ? "präfix" : "ungültig";
+            invalid = true;
+          }
+
+          const indices = Array.from({ length: len }, (_, k) => i + k);
+          lines.push({ asm, cpp, py, cat, invalid, indices });
+          i += len;
+        }
+
+        return {
+          lines,
+          status: [
+            `A <strong>${R.A.toString(2).padStart(8, "0")}</strong> (${R.A})`,
+            `B <strong>${R.B}</strong>`,
+            `C <strong>${R.C}</strong>`,
+            `CF:${CF}`
+          ]
+        };
+      }
+
+      // --- 3. CHIP-8 ---
+      function runChip8(bytes) {
+        const V = new Uint8Array(16);
+        let I = 0;
+        const lines = [];
+
+        for (let i = 0; i < bytes.length; i += 2) {
+          if (i + 1 >= bytes.length) {
+            lines.push({ asm: `… (noch 1 Byte für 16-Bit-Befehl)`, cpp: "// … noch 1 Byte", py: "# … noch 1 Byte", cat: "unvollständig", pending: true, indices: [i] });
+            break;
+          }
+          const op = (bytes[i] << 8) | bytes[i + 1];
+          const x = (op >> 8) & 0xF;
+          const y = (op >> 4) & 0xF;
+          const n = op & 0xF;
+          const nn = op & 0xFF;
+          const nnn = op & 0xFFF;
+          const top = (op >> 12) & 0xF;
+
+          let asm = "", cpp = "", py = "", cat = "", invalid = false;
+          if (op === 0x00E0) { asm = "CLS"; cpp = "clearScreen();"; py = "clear_screen()"; cat = "grafik"; }
+          else if (op === 0x00EE) { asm = "RET"; cpp = "return;"; py = "return"; cat = "sprung"; }
+          else if (top === 0x1) { asm = `JP $${hex4(nnn).slice(1)}`; cpp = `goto addr_0x${hex4(nnn).slice(1)};`; py = `# jump 0x${hex4(nnn).slice(1)}`; cat = "sprung"; }
+          else if (top === 0x2) { asm = `CALL $${hex4(nnn).slice(1)}`; cpp = `fn_${hex4(nnn).slice(1)}();`; py = `fn_${hex4(nnn).slice(1)}()`; cat = "sprung"; }
+          else if (top === 0x3) { asm = `SE V${x.toString(16).toUpperCase()}, #$${hex2(nn)}`; cpp = `if (V[${x}] == 0x${hex2(nn)}) skip();`; py = `if V[${x}] == 0x${hex2(nn)}: skip()`; cat = "vergleich"; }
+          else if (top === 0x4) { asm = `SNE V${x.toString(16).toUpperCase()}, #$${hex2(nn)}`; cpp = `if (V[${x}] != 0x${hex2(nn)}) skip();`; py = `if V[${x}] != 0x${hex2(nn)}: skip()`; cat = "vergleich"; }
+          else if (top === 0x6) { asm = `LD V${x.toString(16).toUpperCase()}, #$${hex2(nn)}`; cpp = `V[${x}] = 0x${hex2(nn)};`; py = `V[${x}] = 0x${hex2(nn)}`; V[x] = nn; cat = "laden"; }
+          else if (top === 0x7) { asm = `ADD V${x.toString(16).toUpperCase()}, #$${hex2(nn)}`; cpp = `V[${x}] = (uint8_t)(V[${x}] + 0x${hex2(nn)});`; py = `V[${x}] = (V[${x}] + 0x${hex2(nn)}) & 0xFF`; V[x] = (V[x] + nn) & 0xFF; cat = "addition"; }
+          else if (top === 0x8 && n === 0) { asm = `LD V${x.toString(16).toUpperCase()}, V${y.toString(16).toUpperCase()}`; cpp = `V[${x}] = V[${y}];`; py = `V[${x}] = V[${y}]`; V[x] = V[y]; cat = "laden"; }
+          else if (top === 0x8 && n === 1) { asm = `OR V${x.toString(16).toUpperCase()}, V${y.toString(16).toUpperCase()}`; cpp = `V[${x}] |= V[${y}];`; py = `V[${x}] |= V[${y}]`; V[x] |= V[y]; cat = "logik"; }
+          else if (top === 0x8 && n === 2) { asm = `AND V${x.toString(16).toUpperCase()}, V${y.toString(16).toUpperCase()}`; cpp = `V[${x}] &= V[${y}];`; py = `V[${x}] &= V[${y}]`; V[x] &= V[y]; cat = "logik"; }
+          else if (top === 0x8 && n === 3) { asm = `XOR V${x.toString(16).toUpperCase()}, V${y.toString(16).toUpperCase()}`; cpp = `V[${x}] ^= V[${y}];`; py = `V[${x}] ^= V[${y}]`; V[x] ^= V[y]; cat = "logik"; }
+          else if (top === 0x8 && n === 4) { asm = `ADD V${x.toString(16).toUpperCase()}, V${y.toString(16).toUpperCase()}`; cpp = `V[${x}] += V[${y}];`; py = `V[${x}] = (V[${x}] + V[${y}]) & 0xFF`; V[x] = (V[x] + V[y]) & 0xFF; cat = "addition"; }
+          else if (top === 0xA) { asm = `LD I, #$${hex4(nnn).slice(1)}`; cpp = `I = 0x${hex4(nnn).slice(1)};`; py = `I = 0x${hex4(nnn).slice(1)}`; I = nnn; cat = "laden"; }
+          else if (top === 0xD) { asm = `DRW V${x.toString(16).toUpperCase()}, V${y.toString(16).toUpperCase()}, #${n}`; cpp = `drawSprite(V[${x}], V[${y}], ${n});`; py = `draw_sprite(V[${x}], V[${y}], ${n})`; cat = "grafik"; }
+          else { asm = `??? ($${hex4(op)})`; cpp = `// unbekannt $${hex4(op)}`; py = `# unbekannt $${hex4(op)}`; cat = "ungültig"; invalid = true; }
+
+          lines.push({ asm, cpp, py, cat, invalid, indices: [i, i + 1] });
+        }
+
+        return {
+          lines,
+          status: [
+            `V0 <strong>${V[0]}</strong>`,
+            `V1 <strong>${V[1]}</strong>`,
+            `V9 <strong>${V[9]}</strong>`,
+            `I <strong>0x${hex4(I).slice(1)}</strong>`
+          ]
+        };
+      }
+
+      // --- 4. Intel 8086 (16-Bit x86) ---
+      const X86_R16 = ["AX", "CX", "DX", "BX", "SP", "BP", "SI", "DI"];
+      const X86_R8 = ["AL", "CL", "DL", "BL", "AH", "CH", "DH", "BH"];
+      function run8086(bytes) {
+        const R = { AX: 0, BX: 0, CX: 0, DX: 0, SP: 0xFFFE, BP: 0, SI: 0, DI: 0 };
+        let CF = 0, ZF = 1;
+        const lines = [];
+        let i = 0;
+
+        const setR8 = (name, val) => {
+          val &= 0xFF;
+          const base = name[0] + "X";
+          if (name[1] === "L") R[base] = (R[base] & 0xFF00) | val;
+          else R[base] = (R[base] & 0x00FF) | (val << 8);
+        };
+        const getR8 = (name) => {
+          const base = name[0] + "X";
+          return name[1] === "L" ? (R[base] & 0xFF) : ((R[base] >> 8) & 0xFF);
+        };
+
+        while (i < bytes.length) {
+          const op = bytes[i];
+          let len = 1, asm = "", cpp = "", py = "", cat = "", invalid = false;
+
+          if (op === 0x90) { asm = "NOP"; cpp = "/* nop */"; py = "pass  # nop"; cat = "steuerung"; }
+          else if (op === 0xF4) { asm = "HLT"; cpp = "return; // halt"; py = "raise SystemExit  # halt"; cat = "steuerung"; }
+          else if (op === 0xC3) { asm = "RET"; cpp = "return;"; py = "return"; cat = "sprung"; }
+          else if (op === 0xF8) { asm = "CLC"; cpp = "CF = 0;"; py = "CF = 0"; CF = 0; cat = "flag / stack"; }
+          else if (op === 0xF9) { asm = "STC"; cpp = "CF = 1;"; py = "CF = 1"; CF = 1; cat = "flag / stack"; }
+          else if (op === 0xF5) { asm = "CMC"; cpp = "CF ^= 1;"; py = "CF ^= 1"; CF ^= 1; cat = "flag / stack"; }
+          else if (op === 0xFA) { asm = "CLI"; cpp = "/* disable interrupts */"; py = "# disable interrupts"; cat = "flag / stack"; }
+          else if (op === 0xFB) { asm = "STI"; cpp = "/* enable interrupts */"; py = "# enable interrupts"; cat = "flag / stack"; }
+          else if (op >= 0x40 && op <= 0x47) {
+            const reg = X86_R16[op & 7];
+            asm = `INC ${reg}`; cpp = `${reg}++;`; py = `${reg} = (${reg} + 1) & 0xFFFF`;
+            R[reg] = (R[reg] + 1) & 0xFFFF; ZF = R[reg] === 0 ? 1 : 0; cat = "addition";
+          }
+          else if (op >= 0x48 && op <= 0x4F) {
+            const reg = X86_R16[op & 7];
+            asm = `DEC ${reg}`; cpp = `${reg}--;`; py = `${reg} = (${reg} - 1) & 0xFFFF`;
+            R[reg] = (R[reg] - 1) & 0xFFFF; ZF = R[reg] === 0 ? 1 : 0; cat = "subtraktion";
+          }
+          else if (op >= 0x50 && op <= 0x57) {
+            const reg = X86_R16[op & 7];
+            asm = `PUSH ${reg}`; cpp = `stack.push(${reg});`; py = `stack.append(${reg})`; cat = "flag / stack";
+          }
+          else if (op >= 0x58 && op <= 0x5F) {
+            const reg = X86_R16[op & 7];
+            asm = `POP ${reg}`; cpp = `${reg} = stack.pop();`; py = `${reg} = stack.pop()`; cat = "flag / stack";
+          }
+          else if (op >= 0xB0 && op <= 0xB7) {
+            len = 2;
+            if (i + len > bytes.length) {
+              lines.push({ asm: `MOV ${X86_R8[op & 7]}, … (noch 1 Byte)`, cpp: "// … noch 1 Byte", py: "# … noch 1 Byte", cat: "unvollständig", pending: true, indices: [i] });
+              break;
+            }
+            const reg = X86_R8[op & 7];
+            const imm = bytes[i + 1];
+            const h = `0x${hex2(imm)}`;
+            asm = `MOV ${reg}, ${h}`; cpp = `${reg} = ${h};`; py = `${reg} = ${h}`;
+            setR8(reg, imm); cat = "laden";
+          }
+          else if (op >= 0xB8 && op <= 0xBF) {
+            len = 3;
+            if (i + len > bytes.length) {
+              const need = i + len - bytes.length;
+              const indices = Array.from({ length: bytes.length - i }, (_, k) => i + k);
+              lines.push({ asm: `MOV ${X86_R16[op & 7]}, … (noch ${need} Byte)`, cpp: `// … noch ${need} Byte`, py: `# … noch ${need} Byte`, cat: "unvollständig", pending: true, indices });
+              break;
+            }
+            const reg = X86_R16[op & 7];
+            const imm16 = (bytes[i + 2] << 8) | bytes[i + 1];
+            const h4 = `0x${hex4(imm16)}`;
+            asm = `MOV ${reg}, ${h4}`; cpp = `${reg} = ${h4};`; py = `${reg} = ${h4}`;
+            R[reg] = imm16; cat = "laden";
+          }
+          else if ([0x04, 0x2C, 0x24, 0x0C, 0x34, 0x3C, 0xCD, 0xEB].includes(op)) {
+            len = 2;
+            if (i + len > bytes.length) {
+              lines.push({ asm: `8086 ($${hex2(op)}) … (noch 1 Byte)`, cpp: "// … noch 1 Byte", py: "# … noch 1 Byte", cat: "unvollständig", pending: true, indices: [i] });
+              break;
+            }
+            const imm = bytes[i + 1];
+            const h = `0x${hex2(imm)}`;
+            if (op === 0x04) { asm = `ADD AL, ${h}`; cpp = `AL = (uint8_t)(AL + ${h});`; py = `AL = (AL + ${h}) & 0xFF`; const s = getR8("AL") + imm; CF = s > 0xFF ? 1 : 0; setR8("AL", s); ZF = getR8("AL") === 0 ? 1 : 0; cat = "addition"; }
+            else if (op === 0x2C) { asm = `SUB AL, ${h}`; cpp = `AL = (uint8_t)(AL - ${h});`; py = `AL = (AL - ${h}) & 0xFF`; const d = getR8("AL") - imm; CF = d < 0 ? 1 : 0; setR8("AL", d); ZF = getR8("AL") === 0 ? 1 : 0; cat = "subtraktion"; }
+            else if (op === 0x24) { asm = `AND AL, ${h}`; cpp = `AL &= ${h};`; py = `AL &= ${h}`; setR8("AL", getR8("AL") & imm); cat = "logik"; }
+            else if (op === 0x0C) { asm = `OR AL, ${h}`; cpp = `AL |= ${h};`; py = `AL |= ${h}`; setR8("AL", getR8("AL") | imm); cat = "logik"; }
+            else if (op === 0x34) { asm = `XOR AL, ${h}`; cpp = `AL ^= ${h};`; py = `AL ^= ${h}`; setR8("AL", getR8("AL") ^ imm); cat = "logik"; }
+            else if (op === 0x3C) { asm = `CMP AL, ${h}`; cpp = `/* compare AL, ${h} */`; py = `# compare AL, ${h}`; ZF = getR8("AL") === imm ? 1 : 0; cat = "vergleich"; }
+            else if (op === 0xCD) { asm = `INT ${h}`; cpp = `interrupt(${h});`; py = `interrupt(${h})`; cat = "sprung"; }
+            else if (op === 0xEB) { asm = `JMP short ${h}`; cpp = `goto offset_${h};`; py = `# jump relative ${h}`; cat = "sprung"; }
+          }
+          else if ([0x05, 0x2D, 0xE8, 0xE9].includes(op)) {
+            len = 3;
+            if (i + len > bytes.length) {
+              const need = i + len - bytes.length;
+              const indices = Array.from({ length: bytes.length - i }, (_, k) => i + k);
+              lines.push({ asm: `8086 ($${hex2(op)}) … (noch ${need} Byte)`, cpp: `// … noch ${need} Byte`, py: `# … noch ${need} Byte`, cat: "unvollständig", pending: true, indices });
+              break;
+            }
+            const imm16 = (bytes[i + 2] << 8) | bytes[i + 1];
+            const h4 = `0x${hex4(imm16)}`;
+            if (op === 0x05) { asm = `ADD AX, ${h4}`; cpp = `AX = (uint16_t)(AX + ${h4});`; py = `AX = (AX + ${h4}) & 0xFFFF`; const s = R.AX + imm16; CF = s > 0xFFFF ? 1 : 0; R.AX = s & 0xFFFF; ZF = R.AX === 0 ? 1 : 0; cat = "addition"; }
+            else if (op === 0x2D) { asm = `SUB AX, ${h4}`; cpp = `AX = (uint16_t)(AX - ${h4});`; py = `AX = (AX - ${h4}) & 0xFFFF`; const d = R.AX - imm16; CF = d < 0 ? 1 : 0; R.AX = d & 0xFFFF; ZF = R.AX === 0 ? 1 : 0; cat = "subtraktion"; }
+            else if (op === 0xE8) { asm = `CALL ${h4}`; cpp = `fn_${h4}();`; py = `fn_${h4}()`; cat = "sprung"; }
+            else if (op === 0xE9) { asm = `JMP ${h4}`; cpp = `goto addr_${h4};`; py = `# jump ${h4}`; cat = "sprung"; }
+          }
+          else if ([0x01, 0x29, 0x89, 0x8B].includes(op)) {
+            len = 2;
+            if (i + len > bytes.length) {
+              lines.push({ asm: `8086 ($${hex2(op)}) … (noch 1 Byte ModR/M)`, cpp: "// … noch 1 Byte", py: "# … noch 1 Byte", cat: "unvollständig", pending: true, indices: [i] });
+              break;
+            }
+            const modrm = bytes[i + 1];
+            if ((modrm & 0xC0) === 0xC0) {
+              const reg = X86_R16[(modrm >> 3) & 7];
+              const rm = X86_R16[modrm & 7];
+              if (op === 0x01) { asm = `ADD ${rm}, ${reg}`; cpp = `${rm} = (uint16_t)(${rm} + ${reg});`; py = `${rm} = (${rm} + ${reg}) & 0xFFFF`; R[rm] = (R[rm] + R[reg]) & 0xFFFF; cat = "addition"; }
+              else if (op === 0x29) { asm = `SUB ${rm}, ${reg}`; cpp = `${rm} = (uint16_t)(${rm} - ${reg});`; py = `${rm} = (${rm} - ${reg}) & 0xFFFF`; R[rm] = (R[rm] - R[reg]) & 0xFFFF; cat = "subtraktion"; }
+              else if (op === 0x89) { asm = `MOV ${rm}, ${reg}`; cpp = `${rm} = ${reg};`; py = `${rm} = ${reg}`; R[rm] = R[reg]; cat = "laden"; }
+              else if (op === 0x8B) { asm = `MOV ${reg}, ${rm}`; cpp = `${reg} = ${rm};`; py = `${reg} = ${rm}`; R[reg] = R[rm]; cat = "laden"; }
+            } else {
+              asm = `8086 ModR/M ($${hex2(op)} $${hex2(modrm)})`;
+              cpp = `/* 8086 Speicher-Adressierung */`;
+              py = `# 8086 Speicher-Adressierung`;
+              cat = "speicher";
+            }
+          }
+          else {
+            asm = `??? ($${hex2(op)})`;
+            cpp = `// unbekannt $${hex2(op)}`;
+            py = `# unbekannt $${hex2(op)}`;
+            cat = "ungültig";
+            invalid = true;
+          }
+
+          const indices = Array.from({ length: len }, (_, k) => i + k);
+          lines.push({ asm, cpp, py, cat, invalid, indices });
+          i += len;
+        }
+
+        return {
+          lines,
+          status: [
+            `AX <strong>0x${hex4(R.AX)}</strong> (${R.AX})`,
+            `BX <strong>0x${hex4(R.BX)}</strong>`,
+            `CX <strong>0x${hex4(R.CX)}</strong>`,
+            `CF:${CF} ZF:${ZF}`
+          ]
+        };
+      }
+
+      function getBytes() {
+        const count = Math.floor(bits.length / 8);
+        const bytes = [];
+        for (let i = 0; i < count; i++) {
+          bytes.push(parseInt(bits.slice(i * 8, i * 8 + 8), 2));
+        }
+        return { bytes, remainder: bits.slice(count * 8) };
+      }
+
+      function highlightBytes(indices, on) {
+        rawEl.querySelectorAll("[data-idx]").forEach((el) => {
+          el.classList.toggle("is-active", on && indices.includes(Number(el.dataset.idx)));
+        });
+      }
+
+      function createUtf8Input(initialValue) {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.id = "utf8-input";
+        input.className = "utf8-input";
+        input.placeholder = t().utf8Placeholder;
+        input.setAttribute("aria-label", t().utf8Aria);
+        input.value = initialValue;
+        input.addEventListener("input", () => {
+          const encoded = utf8Encoder.encode(input.value);
+          bits = Array.from(encoded, (b) => b.toString(2).padStart(8, "0")).join("");
+          copyableOutput = input.value;
+          render();
+        });
+        return input;
+      }
+
+      function applyLangStrings() {
+        const tr = t();
+        document.documentElement.lang = lang;
+        document.title = tr.title;
+        copyOutputBtn.setAttribute("aria-label", tr.copyOut);
+        copyOutputBtn.title = tr.copyOut;
+        copyBitsBtn.setAttribute("aria-label", tr.copyBits);
+        copyBitsBtn.title = tr.copyBits;
+        btnClear.setAttribute("aria-label", tr.clearAll);
+        btnClear.title = tr.clearAll;
+        btnBack.setAttribute("aria-label", tr.delBit);
+        btnBack.title = tr.delBit;
+        btn0.setAttribute("aria-label", tr.zero);
+        btn1.setAttribute("aria-label", tr.one);
+      }
+
+      function render() {
+        applyLangStrings();
+        const tr = t();
+        const { bytes, remainder } = getBytes();
+        const isCpu = arch === "6502" || arch === "z80" || arch === "chip8" || arch === "8086";
+        levelAxisEl.classList.toggle("is-hidden", !isCpu);
+        btnBack.disabled = bits.length === 0;
+        btnClear.disabled = bits.length === 0;
+
+        dotsEl.innerHTML = "";
+        for (let i = 0; i < 8; i++) {
+          const d = document.createElement("div");
+          d.className = "dot";
+          if (i < remainder.length) {
+            d.classList.add(remainder[i] === "1" ? "is-one" : "is-zero");
+          }
+          dotsEl.appendChild(d);
+        }
+
+        const missing = 8 - remainder.length;
+        counterEl.textContent = bits.length === 0
+          ? tr.prompt
+          : tr.bitLabel(bits.length, bytes.length, remainder.length, missing);
+
+        rawEl.innerHTML = "";
+        for (let i = 0; i < bytes.length; i++) {
+          const span = document.createElement("span");
+          span.className = "byte-group";
+          span.dataset.idx = i;
+          span.textContent = bits.slice(i * 8, i * 8 + 8);
+          rawEl.appendChild(span);
+        }
+        if (remainder.length) {
+          const span = document.createElement("span");
+          span.className = "byte-group";
+          span.textContent = remainder;
+          rawEl.appendChild(span);
+        }
+
+        copyBitsBtn.classList.toggle("is-hidden", bits.length === 0);
+
+        hideTip();
+        const activeUtf8 = document.activeElement?.id === "utf8-input" ? document.activeElement : null;
+        if (arch === "utf8" && activeUtf8) {
+          copyOutputBtn.classList.toggle("is-hidden", !copyableOutput);
+          return;
+        }
+
+        stageEl.innerHTML = "";
+        copyableOutput = "";
+
+        if (bits.length === 0) {
+          if (arch === "utf8") {
+            stageEl.appendChild(createUtf8Input(""));
+          } else {
+            stageEl.innerHTML = `<div class="idle-cursor" aria-hidden="true"></div>`;
+          }
+          copyOutputBtn.classList.add("is-hidden");
+          return;
+        }
+
+        if (bytes.length === 0) {
+          stageEl.innerHTML = `<div class="pending-hint">${tr.pendingBits(missing)}</div>`;
+          if (arch === "utf8") stageEl.appendChild(createUtf8Input(""));
+          copyOutputBtn.classList.add("is-hidden");
+          return;
+        }
+
+        const CAT_MAP = {
+          laden: "load", speichern: "store", addition: "add", subtraktion: "sub",
+          logik: "logic", bitshift: "shift", vergleich: "cmp", sprung: "jump",
+          transfer: "xfer", "flag / stack": "flag", grafik: "gfx", steuerung: "ctrl",
+          arithmetik: "math", speicher: "mem", "präfix": "prefix",
+          "ungültig": "invalid", "unvollständig": "incomplete"
+        };
+
+        if (isCpu) {
+          const result = arch === "6502" ? run6502(bytes)
+            : arch === "z80" ? runZ80(bytes)
+            : arch === "chip8" ? runChip8(bytes)
+            : run8086(bytes);
+          const list = document.createElement("div");
+          list.className = "code-list";
+          const outLines = [];
+
+          result.lines.forEach((line) => {
+            const row = document.createElement("div");
+            row.className = "code-line" + (line.invalid ? " is-invalid" : "") + (line.pending ? " is-pending" : "");
+
+            const codeSpan = document.createElement("span");
+            let text = line[level];
+            if (lang === "en") {
+              text = text
+                .replace(/ungültiger Opcode/g, "invalid opcode")
+                .replace(/unbekannt/g, "unknown")
+                .replace(/noch (\d+) Byte/g, "$1 more byte(s)")
+                .replace(/für 16-Bit-Befehl/g, "for 16-bit instruction")
+                .replace(/8086 Speicher-Adressierung/g, "8086 memory addressing");
+            }
+            codeSpan.textContent = text;
+            outLines.push(text);
+            row.appendChild(codeSpan);
+
+            if (line.cat) {
+              const catSpan = document.createElement("span");
+              catSpan.className = "code-cat";
+              const key = CAT_MAP[line.cat];
+              catSpan.textContent = key ? tr.cats[key] : line.cat;
+              row.appendChild(catSpan);
+            }
+
+            row.addEventListener("mouseenter", () => highlightBytes(line.indices, true));
+            row.addEventListener("mouseleave", () => highlightBytes(line.indices, false));
+            if (line.invalid) {
+              const firstByte = bytes[line.indices[0]];
+              let msg = tr.errInvalidOp(hex2(firstByte), arch.toUpperCase());
+              if (arch === "z80" && [0xCB, 0xDD, 0xED, 0xFD].includes(firstByte)) {
+                msg = tr.errZ80Prefix(hex2(firstByte));
+              } else if (arch === "chip8" && line.indices.length === 2) {
+                const op16 = (bytes[line.indices[0]] << 8) | bytes[line.indices[1]];
+                msg = tr.errChip8(hex4(op16));
+              }
+              attachTip(row, msg);
+            } else if (line.pending) {
+              attachTip(row, tr.errPending);
+            }
+            list.appendChild(row);
+          });
+          stageEl.appendChild(list);
+
+          const cpu = document.createElement("div");
+          cpu.className = "cpu-state";
+          cpu.innerHTML = result.status.map((s) => `<span>${s}</span>`).join("");
+          stageEl.appendChild(cpu);
+          copyableOutput = outLines.join("\n");
+        } else if (arch === "utf8") {
+          const flow = document.createElement("div");
+          flow.className = "text-flow";
+          let i = 0;
+          while (i < bytes.length) {
+            const b0 = bytes[i];
+            let len = 1;
+            if ((b0 & 0x80) === 0) len = 1;
+            else if ((b0 & 0xe0) === 0xc0) len = 2;
+            else if ((b0 & 0xf0) === 0xe0) len = 3;
+            else if ((b0 & 0xf8) === 0xf0) len = 4;
+
+            if (i + len > bytes.length) {
+              const s = document.createElement("span");
+              s.className = "text-ctrl";
+              s.textContent = "…";
+              attachTip(s, tr.errUtf8Partial(i + len - bytes.length));
+              flow.appendChild(s);
+              break;
+            }
+            const indices = Array.from({ length: len }, (_, k) => i + k);
+            const slice = bytes.slice(i, i + len);
+            const ch = utf8.decode(new Uint8Array(slice));
+            const span = document.createElement("span");
+            if (len === 1 && (b0 < 32 || b0 === 127)) {
+              span.className = "text-ctrl";
+              span.textContent = `[${hex2(b0)}]`;
+              attachTip(span, tr.errCtrlChar(hex2(b0)));
+            } else if (ch === "\uFFFD") {
+              span.className = "text-err";
+              span.textContent = ch;
+              attachTip(span, explainUtf8Error(slice));
+            } else {
+              span.className = "text-char";
+              span.textContent = b0 === 32 ? "␣" : ch;
+            }
+            span.addEventListener("mouseenter", () => highlightBytes(indices, true));
+            span.addEventListener("mouseleave", () => highlightBytes(indices, false));
+            flow.appendChild(span);
+            i += len;
+          }
+          const decoded = utf8.decode(new Uint8Array(bytes));
+          stageEl.appendChild(flow);
+          stageEl.appendChild(createUtf8Input(decoded));
+          copyableOutput = decoded;
+        } else if (arch === "rgb") {
+          const pixels = Math.floor(bytes.length / 3);
+          if (pixels === 0) {
+            stageEl.innerHTML = `<div class="pending-hint">${tr.pendingRgb(24 - bits.length)}</div>`;
+            copyOutputBtn.classList.add("is-hidden");
+            return;
+          }
+          const grid = document.createElement("div");
+          grid.className = "rgb-flow";
+          const hexList = [];
+          for (let p = 0; p < pixels; p++) {
+            const r = bytes[p * 3], g = bytes[p * 3 + 1], b = bytes[p * 3 + 2];
+            const hex = `#${hex2(r)}${hex2(g)}${hex2(b)}`;
+            hexList.push(hex);
+            const card = document.createElement("div");
+            card.className = "rgb-dot";
+            card.innerHTML = `<div class="rgb-swatch" style="background:${hex}"></div><span>${hex}</span>`;
+            const indices = [p * 3, p * 3 + 1, p * 3 + 2];
+            card.addEventListener("mouseenter", () => highlightBytes(indices, true));
+            card.addEventListener("mouseleave", () => highlightBytes(indices, false));
+            grid.appendChild(card);
+          }
+          stageEl.appendChild(grid);
+          copyableOutput = hexList.join(" ");
+        } else if (arch === "hsl") {
+          const pixels = Math.floor(bytes.length / 3);
+          if (pixels === 0) {
+            stageEl.innerHTML = `<div class="pending-hint">${tr.pendingHsl(24 - bits.length)}</div>`;
+            copyOutputBtn.classList.add("is-hidden");
+            return;
+          }
+          const grid = document.createElement("div");
+          grid.className = "rgb-flow";
+          const hslList = [];
+          for (let p = 0; p < pixels; p++) {
+            const h = Math.round((bytes[p * 3] / 255) * 360);
+            const s = Math.round((bytes[p * 3 + 1] / 255) * 100);
+            const l = Math.round((bytes[p * 3 + 2] / 255) * 100);
+            const css = `hsl(${h}, ${s}%, ${l}%)`;
+            hslList.push(css);
+            const card = document.createElement("div");
+            card.className = "rgb-dot";
+            card.innerHTML = `<div class="rgb-swatch" style="background:${css}"></div><span>${h}° ${s}% ${l}%</span>`;
+            const indices = [p * 3, p * 3 + 1, p * 3 + 2];
+            card.addEventListener("mouseenter", () => highlightBytes(indices, true));
+            card.addEventListener("mouseleave", () => highlightBytes(indices, false));
+            grid.appendChild(card);
+          }
+          stageEl.appendChild(grid);
+          copyableOutput = hslList.join(" ");
+        } else if (arch === "hex") {
+          const list = document.createElement("div");
+          list.className = "code-list";
+          const hexLines = [];
+          bytes.forEach((b, idx) => {
+            const row = document.createElement("div");
+            row.className = "code-line";
+            const ascii = b >= 32 && b <= 126 ? String.fromCharCode(b) : "·";
+            const left = `0x${hex2(b)}  (${String(b).padStart(3, " ")})`;
+            hexLines.push(`0x${hex2(b)}`);
+            row.innerHTML = `<span>${left}</span><span class="code-cat">ASCII ${ascii}</span>`;
+            row.addEventListener("mouseenter", () => highlightBytes([idx], true));
+            row.addEventListener("mouseleave", () => highlightBytes([idx], false));
+            list.appendChild(row);
+          });
+          stageEl.appendChild(list);
+          copyableOutput = hexLines.join(" ");
+        }
+
+        copyOutputBtn.classList.toggle("is-hidden", !copyableOutput);
+      }
+
+      const addBits = (s) => {
+        const clean = s.replace(/[^01]/g, "");
+        if (!clean) return;
+        bits += clean;
+        render();
+      };
+
+      const flashButton = (btn) => {
+        btn.classList.add("is-pressed");
+        setTimeout(() => btn.classList.remove("is-pressed"), 110);
+      };
+
+      btn0.addEventListener("click", () => addBits("0"));
+      btn1.addEventListener("click", () => addBits("1"));
+      btnBack.addEventListener("click", () => { bits = bits.slice(0, -1); render(); });
+      btnClear.addEventListener("click", () => { bits = ""; render(); });
+
+      copyOutputBtn.addEventListener("click", () => copyText(copyOutputBtn, copyableOutput));
+      copyBitsBtn.addEventListener("click", () => {
+        const grouped = bits.match(/.{1,8}/g)?.join(" ") || "";
+        copyText(copyBitsBtn, grouped);
+      });
+
+      document.querySelectorAll("[data-arch]").forEach((btn) => {
+        if (I18N.en.archTips[btn.dataset.arch]) attachTip(btn, () => t().archTips[btn.dataset.arch]);
+        btn.addEventListener("click", () => {
+          arch = btn.dataset.arch;
+          document.querySelectorAll("[data-arch]").forEach((b) => b.setAttribute("aria-selected", String(b === btn)));
+          render();
+        });
+      });
+
+      document.querySelectorAll("[data-level]").forEach((btn) => {
+        if (I18N.en.levelTips[btn.dataset.level]) attachTip(btn, () => t().levelTips[btn.dataset.level]);
+        btn.addEventListener("click", () => {
+          level = btn.dataset.level;
+          document.querySelectorAll("[data-level]").forEach((b) => b.setAttribute("aria-selected", String(b === btn)));
+          render();
+        });
+      });
+
+      document.querySelectorAll("[data-lang]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          lang = btn.dataset.lang;
+          document.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-selected", String(b === btn)));
+          render();
+        });
+      });
+
+      window.addEventListener("keydown", (e) => {
+        if (document.activeElement?.id === "utf8-input") return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (e.key === "0") { e.preventDefault(); flashButton(btn0); addBits("0"); }
+        else if (e.key === "1") { e.preventDefault(); flashButton(btn1); addBits("1"); }
+        else if (e.key === "Backspace") { e.preventDefault(); bits = bits.slice(0, -1); render(); }
+        else if (e.key === "Escape" || e.key === "Delete") { e.preventDefault(); bits = ""; render(); }
+      });
+
+      window.addEventListener("paste", (e) => {
+        if (document.activeElement?.id === "utf8-input") return;
+        const text = e.clipboardData?.getData("text") || "";
+        if (/[01]/.test(text)) { e.preventDefault(); addBits(text); }
+      });
+
+      render();
+    })();
+  </script>
+</body>
+</html>
